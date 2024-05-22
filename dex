@@ -4170,7 +4170,7 @@ end
 
 return {InitDeps = initDeps, InitAfterMain = initAfterMain, Main = main}
 end,
-ScriptViewer = function()
+function ScriptViewer.new(scriptText)
     local self = {}
     
     -- Inicializa a GUI do visualizador de script
