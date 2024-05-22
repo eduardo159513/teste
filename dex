@@ -1,507 +1,641 @@
 -- https://github.com/LorekeeperZinnia/Dex
+
+--[[
+	New Dex
+	Final Version
+	Developed by Moon
+	Modified for Infinite Yield
+	
+	Dex is a debugging suite designed to help the user debug games and find any potential vulnerabilities.
+]]
+
 local nodes = {}
 local selection
 local cloneref = cloneref or function(...) return ... end
 
+local EmbeddedModules = {
+Explorer = function()
+--[[
+	Explorer App Module
+	
+	The main explorer interface
+]]
+
+-- Common Locals
+local Main,Lib,Apps,Settings -- Main Containers
+local Explorer, Properties, ScriptViewer, Notebook -- Major Apps
+local API,RMD,env,service,plr,create,createSimple -- Main Locals
+
 local function initDeps(data)
-  Main = data.Main
-  Lib = data.Lib
-  Apps = data.Apps
-  Settings = data.Settings
-  API = data.API
-  RMD = data.RMD
-  env = data.env
-  service = data.service
-  plr = data.plr
-  create = data.create
-  createSimple = data.createSimple
+	Main = data.Main
+	Lib = data.Lib
+	Apps = data.Apps
+	Settings = data.Settings
+
+	API = data.API
+	RMD = data.RMD
+	env = data.env
+	service = data.service
+	plr = data.plr
+	create = data.create
+	createSimple = data.createSimple
 end
 
 local function initAfterMain()
-  Explorer = Apps.Explorer
-  Properties = Apps.Properties
-  ScriptViewer = Apps.ScriptViewer
-  Notebook = Apps.Notebook
+	Explorer = Apps.Explorer
+	Properties = Apps.Properties
+	ScriptViewer = Apps.ScriptViewer
+	Notebook = Apps.Notebook
 end
 
 local function main()
-  local Explorer = {}
-  local tree, listEntries, explorerOrders, searchResults, specResults = {}, {}, {}, {}, {}
-  local expanded
-  local entryTemplate, treeFrame, toolBar, descendantAddedCon, descendantRemovingCon, itemChangedCon
-  local ffa = game.FindFirstAncestorWhichIsA
-  local getDescendants = game.GetDescendants
-  local getTextSize = service.TextService.GetTextSize
-  local updateDebounce, refreshDebounce = false, false
-  local nilNode = {Obj = Instance.new("Folder")}
-  local idCounter = 0
-  local scrollV, scrollH, clipboard
-  local renameBox, renamingNode, searchFunc
-  local sortingEnabled, autoUpdateSearch
-  local table, math = table, math
-  local nilMap, nilCons = {}, {}
-  local connectSignal = game.DescendantAdded.Connect
-  local addObject, removeObject, moveObject = nil, nil, nil
+	local Explorer = {}
+	local tree,listEntries,explorerOrders,searchResults,specResults = {},{},{},{},{}
+	local expanded
+	local entryTemplate,treeFrame,toolBar,descendantAddedCon,descendantRemovingCon,itemChangedCon
+	local ffa = game.FindFirstAncestorWhichIsA
+	local getDescendants = game.GetDescendants
+	local getTextSize = service.TextService.GetTextSize
+	local updateDebounce,refreshDebounce = false,false
+	local nilNode = {Obj = Instance.new("Folder")}
+	local idCounter = 0
+	local scrollV,scrollH,clipboard
+	local renameBox,renamingNode,searchFunc
+	local sortingEnabled,autoUpdateSearch
+	local table,math = table,math
+	local nilMap,nilCons = {},{}
+	local connectSignal = game.DescendantAdded.Connect
+	local addObject,removeObject,moveObject = nil,nil,nil
 
-  addObject = function(root)
-    if nodes[root] then return end
-    local isNil = false
-    local rootParObj = ffa(root, "Instance")
-    local par = nodes[rootParObj]
-    if not par then
-      if nilMap[root] then
-        nilCons[root] = nilCons[root] or {
-          connectSignal(root.ChildAdded, addObject),
-          connectSignal(root.AncestryChanged, moveObject),
-        }
-        par = nilNode
-        isNil = true
-      else
-        return
-      end
-    elseif nilMap[rootParObj] or par == nilNode then
-      nilMap[root] = true
-      nilCons[root] = nilCons[root] or {
-        connectSignal(root.ChildAdded, addObject),
-        connectSignal(root.AncestryChanged, moveObject),
-      }
-      isNil = true
-    end
-    local newNode = {Obj = root, Parent = par}
-    nodes[root] = newNode
-    if sortingEnabled and expanded[par] and par.Sorted then
-      local left, right = 1, #par
-      local floor = math.floor
-      local sorter = Explorer.NodeSorter
-      local pos = (right == 0 and 1)
-      if not pos then
-        while true do
-          if left >= right then
-            if sorter(newNode, par[left]) then
-              pos = left
-            else
-              pos = left + 1
-            end
-            break
-          end
-          local mid = floor((left + right) / 2)
-          if sorter(newNode, par[mid]) then
-            right = mid - 1
-          else
-            left = mid + 1
-          end
-        end
-      end
-      table.insert(par, pos, newNode)
-    else
-      par[#par + 1] = newNode
-      par.Sorted = nil
-    end
-    local insts = getDescendants(root)
-    for i = 1, #insts do
-        local obj = insts[i]
-        if not nodes[obj] then
-            local par = nodes[ffa(obj, "Instance")]
-            if par then
-                local newNode = {Obj = obj, Parent = par}
-                nodes[obj] = newNode
-                par[#par + 1] = newNode
-                if isNil then
-                    nilMap[obj] = true
-                    nilCons[obj] = nilCons[obj] or {
-                        connectSignal(obj.ChildAdded, addObject),
-                        connectSignal(obj.AncestryChanged, moveObject),
-                    }
-                end
-            end
-        end
-    end
-    if searchFunc and autoUpdateSearch then
-      searchFunc({newNode})
-    end
-    if not updateDebounce and Explorer.IsNodeVisible(par) then
-      if expanded[par] then
-        Explorer.PerformUpdate()
-      elseif not refreshDebounce then
-        Explorer.PerformRefresh()
-      end
-    end
-  end
+	addObject = function(root)
+		if nodes[root] then return end
 
-  removeObject = function(root)
-    local node = nodes[root]
-    if not node then return end
-    if nilMap[node.Obj] then
-      moveObject(node.Obj)
-      return
-    end
-    local par = node.Parent
-    if par then
-      par.HasDel = true
-    end
-    local function recur(root)
-      for i = 1, #root do
-        local node = root[i]
-        if not node.Del then
-          nodes[node.Obj] = nil
-          if #node > 0 then recur(node) end
-        end
-      end
-    end
-    recur(node)
-    node.Del = true
-    nodes[root] = nil
-    if par and not updateDebounce and Explorer.IsNodeVisible(par) then
-      if expanded[par] then
-        Explorer.PerformUpdate()
-      elseif not refreshDebounce then
-        Explorer.PerformRefresh()
-      end
-    end
-  end
+		local isNil = false
+		local rootParObj = ffa(root,"Instance")
+		local par = nodes[rootParObj]
 
-  moveObject = function(obj)
-    local node = nodes[obj]
-    if not node then return end
-    local oldPar = node.Parent
-    local newPar = nodes[ffa(obj, "Instance")]
-    if oldPar == newPar then return end
-    if not newPar then
-      if nilMap[obj] then
-        newPar = nilNode
-      else
-        return
-      end
-    elseif nilMap[newPar.Obj] or newPar == nilNode then
-      nilMap[obj] = true
-      nilCons[obj] = nilCons[obj] or {
-        connectSignal(obj.ChildAdded, addObject),
-        connectSignal(obj.AncestryChanged, moveObject),
-      }
-    end
-    if oldPar then
-      local parPos = table.find(oldPar, node)
-      if parPos then table.remove(oldPar, parPos) end
-    end
-    node.Id = nil
-    node.Parent = newPar
-    if sortingEnabled and expanded[newPar] and newPar.Sorted then
-      local left, right = 1, #newPar
-      local floor = math.floor
-      local sorter = Explorer.NodeSorter
-      local pos = (right == 0 and 1)
-      if not pos then
-        while true do
-          if left >= right then
-            if sorter(node, newPar[left]) then
-              pos = left
-            else
-              pos = left + 1
-            end
-            break
-          end
-          local mid = floor((left + right) / 2)
-          if sorter(node, newPar[mid]) then
-            right = mid - 1
-          else
-            left = mid + 1
-          end
-        end
-      end
-      table.insert(newPar, pos, node)
-    else
-      newPar[#newPar + 1] = node
-      newPar.Sorted = nil
-    end
-    if searchFunc and searchResults[node] then
-      local currentNode = node.Parent
-      while currentNode and (not searchResults[currentNode] or expanded[currentNode] == 0) do
-        expanded[currentNode] = true
-        searchResults[currentNode] = true
-        currentNode = currentNode.Parent
-      end
-    end
-    if not updateDebounce and (Explorer.IsNodeVisible(newPar) or Explorer.IsNodeVisible(oldPar)) then
-      if expanded[newPar] or expanded[oldPar] then
-        Explorer.PerformUpdate()
-      elseif not refreshDebounce then
-        Explorer.PerformRefresh()
-      end
-    end
-  end
+		-- Nil Handling
+		if not par then
+			if nilMap[root] then
+				nilCons[root] = nilCons[root] or {
+					connectSignal(root.ChildAdded,addObject),
+					connectSignal(root.AncestryChanged,moveObject),
+				}
+				par = nilNode
+				isNil = true
+			else
+				return
+			end
+		elseif nilMap[rootParObj] or par == nilNode then
+			nilMap[root] = true
+			nilCons[root] = nilCons[root] or {
+				connectSignal(root.ChildAdded,addObject),
+				connectSignal(root.AncestryChanged,moveObject),
+			}
+			isNil = true
+		end
 
-  Explorer.ViewWidth = 0
-  Explorer.Index = 0
-  Explorer.EntryIndent = 20
-  Explorer.FreeWidth = 32
-  Explorer.GuiElems = {}
-  Explorer.InitRenameBox = function()
-    renameBox = create({{1, "TextBox", {BackgroundColor3 = Color3.new(0.17647059261799, 0.17647059261799, 0.17647059261799), BorderColor3 = Color3.new(0.062745101749897, 0.51764708757401, 1), BorderMode = 2, ClearTextOnFocus = false, Font = 3, Name = "RenameBox", PlaceholderColor3 = Color3.new(0.69803923368454, 0.69803923368454, 0.69803923368454), Position = UDim2.new(0, 26, 0, 2), Size = UDim2.new(0, 200, 0, 16), Text = "", TextColor3 = Color3.new(1, 1, 1), TextSize = 14, TextXAlignment = 0, Visible = false, ZIndex = 2}}})
-    renameBox.Parent = Explorer.Window.GuiElems.Content.List
-    renameBox.FocusLost:Connect(function()
-      if not renamingNode then return end
-      pcall(function() renamingNode.Obj.Name = renameBox.Text end)
-      renamingNode = nil
-      Explorer.Refresh()
-    end)
-    renameBox.Focused:Connect(function()
-      renameBox.SelectionStart = 1
-      renameBox.CursorPosition = #renameBox.Text + 1
-    end)
-  end
-  Explorer.SetRenamingNode = function(node)
-    renamingNode = node
-    renameBox.Text = tostring(node.Obj)
-    renameBox:CaptureFocus()
-    Explorer.Refresh()
-  end
-  Explorer.SetSortingEnabled = function(val)
-    sortingEnabled = val
-    Settings.Explorer.Sorting = val
-  end
-  Explorer.UpdateView = function()
-    local maxNodes = math.ceil(treeFrame.AbsoluteSize.Y / 20)
-    local maxX = treeFrame.AbsoluteSize.X
-    local totalWidth = Explorer.ViewWidth + Explorer.FreeWidth
-    scrollV.VisibleSpace = maxNodes
-    scrollV.TotalSpace = #tree + 1
-    scrollH.VisibleSpace = maxX
-    scrollH.TotalSpace = totalWidth
-    scrollV.Gui.Visible = #tree + 1 > maxNodes
-    scrollH.Gui.Visible = totalWidth > maxX
-    local oldSize = treeFrame.Size
-    treeFrame.Size = UDim2.new(1, (scrollV.Gui.Visible and -16 or 0), 1, (scrollH.Gui.Visible and -39 or -23))
-    if oldSize ~= treeFrame.Size then
-      Explorer.UpdateView()
-    else
-      scrollV:Update()
-      scrollH:Update()
-      renameBox.Size = UDim2.new(0, maxX - 100, 0, 16)
-      if scrollV.Gui.Visible and scrollH.Gui.Visible then
-        scrollV.Gui.Size = UDim2.new(0, 16, 1, -39)
-        scrollH.Gui.Size = UDim2.new(1, -16, 0, 16)
-        Explorer.Window.GuiElems.Content.ScrollCorner.Visible = true
-      else
-        scrollV.Gui.Size = UDim2.new(0, 16, 1, -23)
-        scrollH.Gui.Size = UDim2.new(1, 0, 0, 16)
-        Explorer.Window.GuiElems.Content.ScrollCorner.Visible = false
-      end
-      Explorer.Index = scrollV.Index
-    end
-  end
-  Explorer.NodeSorter = function(a, b)
-    if a.Del or b.Del then return false end
-    local aClass = a.Class
-    local bClass = b.Class
-    if not aClass then aClass = a.Obj.ClassName a.Class = aClass end
-    if not bClass then bClass = b.Obj.ClassName b.Class = bClass end
-    local aOrder = explorerOrders[aClass]
-    local bOrder = explorerOrders[bClass]
-    if not aOrder then aOrder = RMD.Classes[aClass] and tonumber(RMD.Classes[aClass].ExplorerOrder) or 9999 explorerOrders[aClass] = aOrder end
-    if not bOrder then bOrder = RMD.Classes[bClass] and tonumber(RMD.Classes[bClass].ExplorerOrder) or 9999 explorerOrders[bClass] = bOrder end
-    if aOrder ~= bOrder then
-      return aOrder < bOrder
-    else
-      local aName, bName = tostring(a.Obj), tostring(b.Obj)
-      if aName ~= bName then
-        return aName < bName
-      elseif aClass ~= bClass then
-        return aClass < bClass
-      else
-        local aId = a.Id if not aId then aId = idCounter idCounter = (idCounter + 0.001) % 999999999 a.Id = aId end
-        local bId = b.Id if not bId then bId = idCounter idCounter = (idCounter + 0.001) % 999999999 b.Id = bId end
-        return aId < bId
-      end
-    end
-  end
-  Explorer.Update = function()
-    table.clear(tree)
-    local maxNameWidth, maxDepth, count = 0, 1, 1
-    local nameCache = {}
-    local font = Enum.Font.SourceSans
-    local size = Vector2.new(math.huge, 20)
-    local useNameWidth = Settings.Explorer.UseNameWidth
-    local tSort = table.sort
-    local sortFunc = Explorer.NodeSorter
-    local isSearching = (expanded == Explorer.SearchExpanded)
-    local textServ = service.TextService
-    local function recur(root, depth)
-        if depth > maxDepth then maxDepth = depth end
-        depth = depth + 1
-        if sortingEnabled and not root.Sorted then
-          tSort(root, sortFunc)
-          root.Sorted = true
-        end
-        for i = 1, #root do
-          local n = root[i]
-          if not (isSearching and not searchResults[n]) and not n.Del then
-            if useNameWidth then
-              local nameWidth = n.NameWidth
-              if not nameWidth then
-                local objName = tostring(n.Obj)
-                nameWidth = nameCache[objName]
-                if not nameWidth then
-                  nameWidth = getTextSize(textServ, objName, 14, font, size).X
-                  nameCache[objName] = nameWidth
-                end
-              end
-              -- Additional logic for handling nameWidth or other operations can go here
-            end
-            -- Additional processing for node n can go here
-          end
-        end
-      end
--- Assuming the start of some loop or function block
-n.NameWidth = nameWidth
-if nameWidth > maxNameWidth then
-  maxNameWidth = nameWidth
-end
-tree[count] = n
-count = count + 1
-if expanded[n] and #n > 0 then
-  recur(n, depth)
-end
--- Assuming there might be more code or the end of the function/loop
-    recur(nodes[game], 1)
-    if env.getnilinstances then
-      if not (isSearching and not searchResults[nilNode]) then
-        tree[count] = nilNode
-        count = count + 1
-        if expanded[nilNode] then
-          recur(nilNode, 2)
-        end
-      end
-    end
-    Explorer.MaxNameWidth = maxNameWidth
-    Explorer.MaxDepth = maxDepth
-    Explorer.ViewWidth = useNameWidth and Explorer.EntryIndent * maxDepth + maxNameWidth + 26 or Explorer.EntryIndent * maxDepth + 226
-    Explorer.UpdateView()
-  end
-  Explorer.StartDrag = function(offX, offY)
-    if Explorer.Dragging then return end
-    Explorer.Dragging = true
-    local dragTree = treeFrame:Clone()
-    dragTree:ClearAllChildren()
-    for i, v in pairs(listEntries) do
-      local node = tree[i + Explorer.Index]
-      if node and selection.Map[node] then
-        local clone = v:Clone()
-        clone.Active = false
-        clone.Indent.Expand.Visible = false
-        clone.Parent = dragTree
-      end
-    end
-    local newGui = Instance.new("ScreenGui")
-    newGui.DisplayOrder = Main.DisplayOrders.Menu
-    dragTree.Parent = newGui
-    Lib.ShowGui(newGui)
-    local dragOutline = create({
-      {1, "Frame", {BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 1, Name = "DragSelect", Size = UDim2.new(1, 0, 1, 0), }},
-      {2, "Frame", {BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, Name = "Line", Parent = {1}, Size = UDim2.new(1, 0, 0, 1), ZIndex = 2, }},
-      {3, "Frame", {BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, Name = "Line", Parent = {1}, Position = UDim2.new(0, 0, 1, -1), Size = UDim2.new(1, 0, 0, 1), ZIndex = 2, }},
-      {4, "Frame", {BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, Name = "Line", Parent = {1}, Size = UDim2.new(0, 1, 1, 0), ZIndex = 2, }},
-      {5, "Frame", {BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, Name = "Line", Parent = {1}, Position = UDim2.new(1, -1, 0, 0), Size = UDim2.new(0, 1, 1, 0), ZIndex = 2, }},
-    })
-    dragOutline.Parent = treeFrame
-    local mouse = Main.Mouse or service.Players.LocalPlayer:GetMouse()
-    local function move()
-      local posX = mouse.X - offX
-      local posY = mouse.Y - offY
-      dragTree.Position = UDim2.new(0, posX, 0, posY)
-      for i = 1, #listEntries do
-        local entry = listEntries[i]
-        if Lib.CheckMouseInGui(entry) then
-          dragOutline.Position = UDim2.new(0, entry.Indent.Position.X.Offset - scrollH.Index, 0, entry.Position.Y.Offset)
-          dragOutline.Size = UDim2.new(0, entry.Size.X.Offset - entry.Indent.Position.X.Offset, 0, 20)
-          dragOutline.Visible = true
-          return
-        end
-      end
-      dragOutline.Visible = false
-    end
-    move()
-    local input = service.UserInputService
-local mouseEvent, releaseEvent
+		local newNode = {Obj = root, Parent = par}
+		nodes[root] = newNode
 
-mouseEvent = input.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement then
-        move()
-    end
-end)
+		-- Automatic sorting if expanded
+		if sortingEnabled and expanded[par] and par.Sorted then
+			local left,right = 1,#par
+			local floor = math.floor
+			local sorter = Explorer.NodeSorter
+			local pos = (right == 0 and 1)
 
-releaseEvent = input.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        releaseEvent:Disconnect()
-        mouseEvent:Disconnect()
-        newGui:Destroy()
-        dragOutline:Destroy()
-        Explorer.Dragging = false
-        for i, entry in ipairs(listEntries) do
-            if Lib.CheckMouseInGui(entry) then
-                local node = tree[i + Explorer.Index]
-                if node and not selection.Map[node] then
-                    local newPar = node.Obj
-                    for _, n in ipairs(selection.List) do
-                        pcall(function() n.Obj.Parent = newPar end)
-                    end
-                    Explorer.ViewNode(selection.List[1])
-                    break
-                end
-            end
-        end
-    end
-end)
+			if not pos then
+				while true do
+					if left >= right then
+						if sorter(newNode,par[left]) then
+							pos = left
+						else
+							pos = left+1
+						end
+						break
+					end
 
-Explorer.NewListEntry = function(index)
-    local newEntry = entryTemplate:Clone()
-    newEntry.Position = UDim2.new(0, 0, 0, 20 * (index - 1))
-    local isRenaming = false
+					local mid = floor((left+right)/2)
+					if sorter(newNode,par[mid]) then
+						right = mid-1
+					else
+						left = mid+1
+					end
+				end
+			end
 
-    newEntry.InputBegan:Connect(function(input)
-        local node = tree[index + Explorer.Index]
-        if node and not selection.Map[node] and input.UserInputType == Enum.UserInputType.MouseMovement then
-            newEntry.Indent.BackgroundColor3 = Settings.Theme.Button
-            newEntry.Indent.BorderSizePixel = 0
-            newEntry.Indent.BackgroundTransparency = 0
-        end
-    end)
+			table.insert(par,pos,newNode)
+		else
+			par[#par+1] = newNode
+			par.Sorted = nil
+		end
 
-    newEntry.InputEnded:Connect(function(input)
-        local node = tree[index + Explorer.Index]
-        if node and not selection.Map[node] and input.UserInputType == Enum.UserInputType.MouseMovement then
-            newEntry.Indent.BackgroundTransparency = 1
-        end
-    end)
+		local insts = getDescendants(root)
+		for i = 1,#insts do
+			local obj = insts[i]
+			if nodes[obj] then continue end -- Deferred
+			
+			local par = nodes[ffa(obj,"Instance")]
+			if not par then continue end
+			local newNode = {Obj = obj, Parent = par}
+			nodes[obj] = newNode
+			par[#par+1] = newNode
 
-    newEntry.MouseButton1Down:Connect(function()
-        local mouse = Main.Mouse or plr:GetMouse()
-        local startX, startY = mouse.X, mouse.Y
-        local listOffsetX = startX - treeFrame.AbsolutePosition.X
-        local listOffsetY = startY - treeFrame.AbsolutePosition.Y
+			-- Nil Handling
+			if isNil then
+				nilMap[obj] = true
+				nilCons[obj] = nilCons[obj] or {
+					connectSignal(obj.ChildAdded,addObject),
+					connectSignal(obj.AncestryChanged,moveObject),
+				}
+			end
+		end
 
-        releaseEvent = input.InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                releaseEvent:Disconnect()
-                mouseEvent:Disconnect()
-            end
-        end)
+		if searchFunc and autoUpdateSearch then
+			searchFunc({newNode})
+		end
 
-        mouseEvent = input.InputChanged:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseMovement then
-                local deltaX, deltaY = mouse.X - startX, mouse.Y - startY
-                if math.sqrt(deltaX^2 + deltaY^2) > 5 then
-                    releaseEvent:Disconnect()
-                    mouseEvent:Disconnect()
-                    isRenaming = false
-                    Explorer.StartDrag(listOffsetX, listOffsetY)
-                end
-            end
-        end)
-    end)
+		if not updateDebounce and Explorer.IsNodeVisible(par) then
+			if expanded[par] then
+				Explorer.PerformUpdate()
+			elseif not refreshDebounce then
+				Explorer.PerformRefresh()
+			end
+		end
+	end
 
-    newEntry.Parent = treeFrame
-    return newEntry
-end
+	removeObject = function(root)
+		local node = nodes[root]
+		if not node then return end
+
+		-- Nil Handling
+		if nilMap[node.Obj] then
+			moveObject(node.Obj)
+			return
+		end
+
+		local par = node.Parent
+		if par then
+			par.HasDel = true
+		end
+
+		local function recur(root)
+			for i = 1,#root do
+				local node = root[i]
+				if not node.Del then
+					nodes[node.Obj] = nil
+					if #node > 0 then recur(node) end
+				end
+			end
+		end
+		recur(node)
+		node.Del = true
+		nodes[root] = nil
+
+		if par and not updateDebounce and Explorer.IsNodeVisible(par) then
+			if expanded[par] then
+				Explorer.PerformUpdate()
+			elseif not refreshDebounce then
+				Explorer.PerformRefresh()
+			end
+		end
+	end
+
+	moveObject = function(obj)
+		local node = nodes[obj]
+		if not node then return end
+
+		local oldPar = node.Parent
+		local newPar = nodes[ffa(obj,"Instance")]
+		if oldPar == newPar then return end
+
+		-- Nil Handling
+		if not newPar then
+			if nilMap[obj] then
+				newPar = nilNode
+			else
+				return
+			end
+		elseif nilMap[newPar.Obj] or newPar == nilNode then
+			nilMap[obj] = true
+			nilCons[obj] = nilCons[obj] or {
+				connectSignal(obj.ChildAdded,addObject),
+				connectSignal(obj.AncestryChanged,moveObject),
+			}
+		end
+
+		if oldPar then
+			local parPos = table.find(oldPar,node)
+			if parPos then table.remove(oldPar,parPos) end
+		end
+
+		node.Id = nil
+		node.Parent = newPar
+
+		if sortingEnabled and expanded[newPar] and newPar.Sorted then
+			local left,right = 1,#newPar
+			local floor = math.floor
+			local sorter = Explorer.NodeSorter
+			local pos = (right == 0 and 1)
+
+			if not pos then
+				while true do
+					if left >= right then
+						if sorter(node,newPar[left]) then
+							pos = left
+						else
+							pos = left+1
+						end
+						break
+					end
+
+					local mid = floor((left+right)/2)
+					if sorter(node,newPar[mid]) then
+						right = mid-1
+					else
+						left = mid+1
+					end
+				end
+			end
+
+			table.insert(newPar,pos,node)
+		else
+			newPar[#newPar+1] = node
+			newPar.Sorted = nil
+		end
+
+		if searchFunc and searchResults[node] then
+			local currentNode = node.Parent
+			while currentNode and (not searchResults[currentNode] or expanded[currentNode] == 0) do
+				expanded[currentNode] = true
+				searchResults[currentNode] = true
+				currentNode = currentNode.Parent
+			end
+		end
+
+		if not updateDebounce and (Explorer.IsNodeVisible(newPar) or Explorer.IsNodeVisible(oldPar)) then
+			if expanded[newPar] or expanded[oldPar] then
+				Explorer.PerformUpdate()
+			elseif not refreshDebounce then
+				Explorer.PerformRefresh()
+			end
+		end
+	end
+
+	Explorer.ViewWidth = 0
+	Explorer.Index = 0
+	Explorer.EntryIndent = 20
+	Explorer.FreeWidth = 32
+	Explorer.GuiElems = {}
+
+	Explorer.InitRenameBox = function()
+		renameBox = create({{1,"TextBox",{BackgroundColor3=Color3.new(0.17647059261799,0.17647059261799,0.17647059261799),BorderColor3=Color3.new(0.062745101749897,0.51764708757401,1),BorderMode=2,ClearTextOnFocus=false,Font=3,Name="RenameBox",PlaceholderColor3=Color3.new(0.69803923368454,0.69803923368454,0.69803923368454),Position=UDim2.new(0,26,0,2),Size=UDim2.new(0,200,0,16),Text="",TextColor3=Color3.new(1,1,1),TextSize=14,TextXAlignment=0,Visible=false,ZIndex=2}}})
+
+		renameBox.Parent = Explorer.Window.GuiElems.Content.List
+
+		renameBox.FocusLost:Connect(function()
+			if not renamingNode then return end
+
+			pcall(function() renamingNode.Obj.Name = renameBox.Text end)
+			renamingNode = nil
+			Explorer.Refresh()
+		end)
+
+		renameBox.Focused:Connect(function()
+			renameBox.SelectionStart = 1
+			renameBox.CursorPosition = #renameBox.Text + 1
+		end)
+	end
+
+	Explorer.SetRenamingNode = function(node)
+		renamingNode = node
+		renameBox.Text = tostring(node.Obj)
+		renameBox:CaptureFocus()
+		Explorer.Refresh()
+	end
+
+	Explorer.SetSortingEnabled = function(val)
+		sortingEnabled = val
+		Settings.Explorer.Sorting = val
+	end
+
+	Explorer.UpdateView = function()
+		local maxNodes = math.ceil(treeFrame.AbsoluteSize.Y / 20)
+		local maxX = treeFrame.AbsoluteSize.X
+		local totalWidth = Explorer.ViewWidth + Explorer.FreeWidth
+
+		scrollV.VisibleSpace = maxNodes
+		scrollV.TotalSpace = #tree + 1
+		scrollH.VisibleSpace = maxX
+		scrollH.TotalSpace = totalWidth
+
+		scrollV.Gui.Visible = #tree + 1 > maxNodes
+		scrollH.Gui.Visible = totalWidth > maxX
+
+		local oldSize = treeFrame.Size
+		treeFrame.Size = UDim2.new(1,(scrollV.Gui.Visible and -16 or 0),1,(scrollH.Gui.Visible and -39 or -23))
+		if oldSize ~= treeFrame.Size then
+			Explorer.UpdateView()
+		else
+			scrollV:Update()
+			scrollH:Update()
+
+			renameBox.Size = UDim2.new(0,maxX-100,0,16)
+
+			if scrollV.Gui.Visible and scrollH.Gui.Visible then
+				scrollV.Gui.Size = UDim2.new(0,16,1,-39)
+				scrollH.Gui.Size = UDim2.new(1,-16,0,16)
+				Explorer.Window.GuiElems.Content.ScrollCorner.Visible = true
+			else
+				scrollV.Gui.Size = UDim2.new(0,16,1,-23)
+				scrollH.Gui.Size = UDim2.new(1,0,0,16)
+				Explorer.Window.GuiElems.Content.ScrollCorner.Visible = false
+			end
+
+			Explorer.Index = scrollV.Index
+		end
+	end
+
+	Explorer.NodeSorter = function(a,b)
+		if a.Del or b.Del then return false end -- Ghost node
+
+		local aClass = a.Class
+		local bClass = b.Class
+		if not aClass then aClass = a.Obj.ClassName a.Class = aClass end
+		if not bClass then bClass = b.Obj.ClassName b.Class = bClass end
+
+		local aOrder = explorerOrders[aClass]
+		local bOrder = explorerOrders[bClass]
+		if not aOrder then aOrder = RMD.Classes[aClass] and tonumber(RMD.Classes[aClass].ExplorerOrder) or 9999 explorerOrders[aClass] = aOrder end
+		if not bOrder then bOrder = RMD.Classes[bClass] and tonumber(RMD.Classes[bClass].ExplorerOrder) or 9999 explorerOrders[bClass] = bOrder end
+
+		if aOrder ~= bOrder then
+			return aOrder < bOrder
+		else
+			local aName,bName = tostring(a.Obj),tostring(b.Obj)
+			if aName ~= bName then
+				return aName < bName
+			elseif aClass ~= bClass then
+				return aClass < bClass
+			else
+				local aId = a.Id if not aId then aId = idCounter idCounter = (idCounter+0.001)%999999999 a.Id = aId end
+				local bId = b.Id if not bId then bId = idCounter idCounter = (idCounter+0.001)%999999999 b.Id = bId end
+				return aId < bId
+			end
+		end
+	end
+
+	Explorer.Update = function()
+		table.clear(tree)
+		local maxNameWidth,maxDepth,count = 0,1,1
+		local nameCache = {}
+		local font = Enum.Font.SourceSans
+		local size = Vector2.new(math.huge,20)
+		local useNameWidth = Settings.Explorer.UseNameWidth
+		local tSort = table.sort
+		local sortFunc = Explorer.NodeSorter
+		local isSearching = (expanded == Explorer.SearchExpanded)
+		local textServ = service.TextService
+
+		local function recur(root,depth)
+			if depth > maxDepth then maxDepth = depth end
+			depth = depth + 1
+			if sortingEnabled and not root.Sorted then
+				tSort(root,sortFunc)
+				root.Sorted = true
+			end
+			for i = 1,#root do
+				local n = root[i]
+
+				if (isSearching and not searchResults[n]) or n.Del then continue end
+
+				if useNameWidth then
+					local nameWidth = n.NameWidth
+					if not nameWidth then
+						local objName = tostring(n.Obj)
+						nameWidth = nameCache[objName]
+						if not nameWidth then
+							nameWidth = getTextSize(textServ,objName,14,font,size).X
+							nameCache[objName] = nameWidth
+						end
+						n.NameWidth = nameWidth
+					end
+					if nameWidth > maxNameWidth then
+						maxNameWidth = nameWidth
+					end
+				end
+
+				tree[count] = n
+				count = count + 1
+				if expanded[n] and #n > 0 then
+					recur(n,depth)
+				end
+			end
+		end
+
+		recur(nodes[game],1)
+
+		-- Nil Instances
+		if env.getnilinstances then
+			if not (isSearching and not searchResults[nilNode]) then
+				tree[count] = nilNode
+				count = count + 1
+				if expanded[nilNode] then
+					recur(nilNode,2)
+				end
+			end
+		end
+
+		Explorer.MaxNameWidth = maxNameWidth
+		Explorer.MaxDepth = maxDepth
+		Explorer.ViewWidth = useNameWidth and Explorer.EntryIndent*maxDepth + maxNameWidth + 26 or Explorer.EntryIndent*maxDepth + 226
+		Explorer.UpdateView()
+	end
+
+	Explorer.StartDrag = function(offX,offY)
+		if Explorer.Dragging then return end
+		Explorer.Dragging = true
+
+		local dragTree = treeFrame:Clone()
+		dragTree:ClearAllChildren()
+
+		for i,v in pairs(listEntries) do
+			local node = tree[i + Explorer.Index]
+			if node and selection.Map[node] then
+				local clone = v:Clone()
+				clone.Active = false
+				clone.Indent.Expand.Visible = false
+				clone.Parent = dragTree
+			end
+		end
+
+		local newGui = Instance.new("ScreenGui")
+		newGui.DisplayOrder = Main.DisplayOrders.Menu
+		dragTree.Parent = newGui
+		Lib.ShowGui(newGui)
+
+		local dragOutline = create({
+			{1,"Frame",{BackgroundColor3=Color3.new(1,1,1),BackgroundTransparency=1,Name="DragSelect",Size=UDim2.new(1,0,1,0),}},
+			{2,"Frame",{BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0,Name="Line",Parent={1},Size=UDim2.new(1,0,0,1),ZIndex=2,}},
+			{3,"Frame",{BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0,Name="Line",Parent={1},Position=UDim2.new(0,0,1,-1),Size=UDim2.new(1,0,0,1),ZIndex=2,}},
+			{4,"Frame",{BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0,Name="Line",Parent={1},Size=UDim2.new(0,1,1,0),ZIndex=2,}},
+			{5,"Frame",{BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0,Name="Line",Parent={1},Position=UDim2.new(1,-1,0,0),Size=UDim2.new(0,1,1,0),ZIndex=2,}},
+		})
+		dragOutline.Parent = treeFrame
+
+
+		local mouse = Main.Mouse or service.Players.LocalPlayer:GetMouse()
+		local function move()
+			local posX = mouse.X - offX
+			local posY = mouse.Y - offY
+			dragTree.Position = UDim2.new(0,posX,0,posY)
+
+			for i = 1,#listEntries do
+				local entry = listEntries[i]
+				if Lib.CheckMouseInGui(entry) then
+					dragOutline.Position = UDim2.new(0,entry.Indent.Position.X.Offset-scrollH.Index,0,entry.Position.Y.Offset)
+					dragOutline.Size = UDim2.new(0,entry.Size.X.Offset-entry.Indent.Position.X.Offset,0,20)
+					dragOutline.Visible = true
+					return
+				end
+			end
+			dragOutline.Visible = false
+		end
+		move()
+
+		local input = service.UserInputService
+		local mouseEvent,releaseEvent
+
+		mouseEvent = input.InputChanged:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseMovement then
+				move()
+			end
+		end)
+
+		releaseEvent = input.InputEnded:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 then
+				releaseEvent:Disconnect()
+				mouseEvent:Disconnect()
+				newGui:Destroy()
+				dragOutline:Destroy()
+				Explorer.Dragging = false
+
+				for i = 1,#listEntries do
+					if Lib.CheckMouseInGui(listEntries[i]) then
+						local node = tree[i + Explorer.Index]
+						if node then
+							if selection.Map[node] then return end
+							local newPar = node.Obj
+							local sList = selection.List
+							for i = 1,#sList do
+								local n = sList[i]
+								pcall(function() n.Obj.Parent = newPar end)
+							end
+							Explorer.ViewNode(sList[1])
+						end
+						break
+					end
+				end
+			end
+		end)
+	end
+
+	Explorer.NewListEntry = function(index)
+		local newEntry = entryTemplate:Clone()
+		newEntry.Position = UDim2.new(0,0,0,20*(index-1))
+
+		local isRenaming = false
+
+		newEntry.InputBegan:Connect(function(input)
+			local node = tree[index + Explorer.Index]
+			if not node or selection.Map[node] or input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+
+			newEntry.Indent.BackgroundColor3 = Settings.Theme.Button
+			newEntry.Indent.BorderSizePixel = 0
+			newEntry.Indent.BackgroundTransparency = 0
+		end)
+
+		newEntry.InputEnded:Connect(function(input)
+			local node = tree[index + Explorer.Index]
+			if not node or selection.Map[node] or input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+
+			newEntry.Indent.BackgroundTransparency = 1
+		end)
+
+		newEntry.MouseButton1Down:Connect(function()
+
+		end)
+
+		newEntry.MouseButton1Up:Connect(function()
+
+		end)
+
+		newEntry.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 then
+				local releaseEvent,mouseEvent
+
+				local mouse = Main.Mouse or plr:GetMouse()
+				local startX = mouse.X
+				local startY = mouse.Y
+
+				local listOffsetX = startX - treeFrame.AbsolutePosition.X
+				local listOffsetY = startY - treeFrame.AbsolutePosition.Y
+
+				releaseEvent = cloneref(game:GetService("UserInputService")).InputEnded:Connect(function(input)
+					if input.UserInputType == Enum.UserInputType.MouseButton1 then
+						releaseEvent:Disconnect()
+						mouseEvent:Disconnect()
+					end
+				end)
+
+				mouseEvent = cloneref(game:GetService("UserInputService")).InputChanged:Connect(function(input)
+					if input.UserInputType == Enum.UserInputType.MouseMovement then
+						local deltaX = mouse.X - startX
+						local deltaY = mouse.Y - startY
+						local dist = math.sqrt(deltaX^2 + deltaY^2)
+
+						if dist > 5 then
+							releaseEvent:Disconnect()
+							mouseEvent:Disconnect()
+							isRenaming = false
+							Explorer.StartDrag(listOffsetX,listOffsetY)
+						end
+					end
+				end)
+			end
+		end)
+
+		newEntry.MouseButton2Down:Connect(function()
+
+		end)
+
+		newEntry.Indent.Expand.InputBegan:Connect(function(input)
+			local node = tree[index + Explorer.Index]
+			if not node or input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+
+			Explorer.MiscIcons:DisplayByKey(newEntry.Indent.Expand.Icon, expanded[node] and "Collapse_Over" or "Expand_Over")
+		end)
+
+		newEntry.Indent.Expand.InputEnded:Connect(function(input)
+			local node = tree[index + Explorer.Index]
+			if not node or input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+
+			Explorer.MiscIcons:DisplayByKey(newEntry.Indent.Expand.Icon, expanded[node] and "Collapse" or "Expand")
+		end)
+
+		newEntry.Indent.Expand.MouseButton1Down:Connect(function()
+			local node = tree[index + Explorer.Index]
+			if not node or #node == 0 then return end
+
+			expanded[node] = not expanded[node]
+			Explorer.Update()
+			Explorer.Refresh()
+		end)
+
+		newEntry.Parent = treeFrame
+		return newEntry
+	end
 
 	Explorer.Refresh = function()
 		local maxNodes = math.max(math.ceil((treeFrame.AbsoluteSize.Y) / 20),0)	
@@ -2098,50 +2232,39 @@ return search]==]
 		Explorer.SetupConnections()
 
 		local insts = getDescendants(game)
-if Main.Elevated then
-    for i = 1, #insts do
-        local obj = insts[i]
-        local par = nodes[ffa(obj, "Instance")]
-        if par then  -- Only execute if par is not nil
-            local newNode = {
-                Obj = obj,
-                Parent = par,
-            }
-            nodes[obj] = newNode
-            par[#par + 1] = newNode
-        end
-    end
-else  -- Correct placement of 'else'
-    for i = 1, #insts do
-        local obj = insts[i]
-        local s, parObj = pcall(ffa, obj, "Instance")
-        local par = nodes[parObj]
-        if par then  -- Only execute if par is not nil
-            local newNode = {
-                Obj = obj,
-                Parent = par,
-            }
-            nodes[obj] = newNode
-            par[#par + 1] = newNode
-        end
-    end
-end
+		if Main.Elevated then
+			for i = 1,#insts do
+				local obj = insts[i]
+				local par = nodes[ffa(obj,"Instance")]
+				if not par then continue end
+				local newNode = {
+					Obj = obj,
+					Parent = par,
+				}
+				nodes[obj] = newNode
+				par[#par+1] = newNode
+			end
+		else
+			for i = 1,#insts do
+				local obj = insts[i]
+				local s,parObj = pcall(ffa,obj,"Instance")
+				local par = nodes[parObj]
+				if not par then continue end
+				local newNode = {
+					Obj = obj,
+					Parent = par,
+				}
+				nodes[obj] = newNode
+				par[#par+1] = newNode
+			end
+		end
+	end
 
 	return Explorer
 end
 
-local function initializeModule()
-    local initDeps = {} -- Assuming initDeps should be an empty table
-    local initAfterMain = false -- Assuming a boolean value is expected
-    local main = function() -- Assuming main is a function
-        print("Main function executed")
-    end
-    return {
-        InitDeps = initDeps,
-        InitAfterMain = initAfterMain,
-        Main = main
-    }
-end
+return {InitDeps = initDeps, InitAfterMain = initAfterMain, Main = main}
+end,
 Properties = function()
 --[[
 	Properties App Module
@@ -4046,24 +4169,41 @@ local function main()
 end
 
 return {InitDeps = initDeps, InitAfterMain = initAfterMain, Main = main}
+end,
+ScriptViewer = function()
+    local self = {}
+    
+    -- Inicializa a GUI do visualizador de script
+    function self.InitGui()
+        -- Criar a GUI aqui (pode ser feito usando as APIs de GUI do Roblox)
+    end
+    
+    -- Atualiza o texto exibido no visualizador
+    function self.UpdateText(newText)
+        -- Atualizar o texto exibido na GUI com o novo texto
+    end
+    
+    -- Retorna o texto atualmente exibido no visualizador
+    function self.GetText()
+        -- Retornar o texto atual da GUI
+    end
+    
+    -- Função para fechar o visualizador de script
+    function self.Close()
+        -- Fechar a GUI do visualizador de script
+    end
+    
+    -- Inicializa o visualizador de script
+    self.InitGui()
+    self.UpdateText(scriptText)
+    
+    return self
 end
 
-
-local Main
-local Lib
-local Apps
-local Settings
-local Explorer
-local Properties
-local ScriptViewer
-local Notebook
-local API
-local RMD
-local env
-local service
-local plr
-local create
-local createSimple
+-- Common Locals
+local Main,Lib,Apps,Settings -- Main Containers
+local Explorer, Properties, ScriptViewer, Notebook -- Major Apps
+local API,RMD,env,service,plr,create,createSimple -- Main Locals
 
 local function initDeps(data)
 	Main = data.Main
@@ -4089,45 +4229,15 @@ end
 
 local function main()
 	local ScriptViewer = {}
-    ScriptViewer.__index = ScriptViewer
 	local window, codeFrame
 	local PreviousScr = nil
 
-    function ScriptViewer.new()
-        local self = setmetatable({}, ScriptViewer)
-        -- Initialize GUI elements
-        local window = Lib.Window.new()
-        window:SetTitle("Script Viewer")
-        window:Resize(500, 400)
-        local codeFrame = Lib.CodeFrame.new()
-        codeFrame.Frame.Position = UDim2.new(0, 0, 0, 20)
-        codeFrame.Frame.Size = UDim2.new(1, 0, 1, -20)
-        codeFrame.Frame.Parent = window.GuiElems.Content
-    
-        -- Additional GUI elements like buttons
-        local copy = Instance.new("TextButton", window.GuiElems.Content)
-        copy.BackgroundTransparency = 1
-        copy.Size = UDim2.new(0.5, 0, 0, 20)
-        copy.Text = "Copy to Clipboard"
-        copy.TextColor3 = Color3.new(1, 1, 1)
-        copy.MouseButton1Click:Connect(function()
-            local source = codeFrame:GetText()
-            env.setclipboard(source)
-        end)
-    
-        self.window = window
-        self.codeFrame = codeFrame
-        return self
-    end
-
-	function ScriptViewer:ViewScript(scr)
-        local success, source = pcall(env.decompile or function() end, scr)
-        if not success or not source then
-            source = "-- DEX - Source failed to decompile"
-        end
-        self.codeFrame:SetText(source:gsub("\0", "\\0"))
-        self.window:Show()
-    end
+	ScriptViewer.ViewScript = function(scr)
+		local success, source = pcall(env.decompile or function() end, scr)
+		if not success or not source then source, PreviousScr = "-- DEX - Source failed to decompile", nil else PreviousScr = scr end
+		codeFrame:SetText(source:gsub("\0", "\\0")) -- Fix stupid breaking script viewer
+		window:Show()
+	end
 
 	ScriptViewer.Init = function()
 		window = Lib.Window.new()
@@ -4269,14 +4379,13 @@ local function main()
 end
 
 return {InitDeps = initDeps, InitAfterMain = initAfterMain, Main = main}
-end
+end,
 Lib = function()
 --[[
 	Lib Module
 	
 	Container for functions and classes
 ]]
-
 
 -- Common Locals
 local Main,Lib,Apps,Settings -- Main Containers
@@ -6655,12 +6764,7 @@ local function main()
 	end)()
 
 	Lib.CodeFrame = (function()
-		-- Define the main module table
-         local module = {}
-
-        -- Functions table to hold all methods
-        local funcs = {}
-
+		local funcs = {}
 
 		local typeMap = {
 			[1] = "String",
@@ -7286,7 +7390,7 @@ local function main()
 			return 0
 		end
 		
-		funcs.SetEditing = function(self, on, input)			
+		funcs.SetEditing = function(self,on,input)			
 			self:UpdateCursor(input)
 			
 			if on then
@@ -7299,7 +7403,7 @@ local function main()
 			end
 		end
 		
-		funcs.CursorAnim = function(self, on)
+		funcs.CursorAnim = function(self,on)
 			local cursor = self.GuiElems.Cursor
 			local animTime = tick()
 			self.LastAnimTime = animTime
@@ -7340,23 +7444,24 @@ local function main()
 			local hSize = math.max(0,linesFrame.AbsoluteSize.X)
 			local vSize = math.max(0,linesFrame.AbsoluteSize.Y)
 			local maxLines = math.ceil(vSize / self.FontSize)
-			local maxCols = math.ceil(hSize / math.ceil(self.FontSize / 2))
-			local viewX,viewY = self.ViewX, self.ViewY
+			local maxCols = math.ceil(hSize / math.ceil(self.FontSize/2))
+			local viewX,viewY = self.ViewX,self.ViewY
 			local totalLinesStr = tostring(#self.Lines)
 			local fontWidth = math.ceil(self.FontSize / 2)
-			local linesOffset = #totalLinesStr * fontWidth + 4 * fontWidth
+			local linesOffset = #totalLinesStr*fontWidth + 4*fontWidth
 			
 			if input then
 				local linesFrame = self.GuiElems.LinesFrame
-				local frameX,frameY = linesFrame.AbsolutePosition.X, linesFrame.AbsolutePosition.Y
-				local mouseX,mouseY = input.Position.X, input.Position.Y
-				local fontSizeX,fontSizeY = math.ceil(self.FontSize / 2),self.FontSize
+				local frameX,frameY = linesFrame.AbsolutePosition.X,linesFrame.AbsolutePosition.Y
+				local mouseX,mouseY = input.Position.X,input.Position.Y
+				local fontSizeX,fontSizeY = math.ceil(self.FontSize/2),self.FontSize
 
 				self.CursorX = self.ViewX + math.round((mouseX - frameX) / fontSizeX)
 				self.CursorY = self.ViewY + math.floor((mouseY - frameY) / fontSizeY)
 			end
 			
-			local cursorX,cursorY = self.CursorX,self.CursorY			
+			local cursorX,cursorY = self.CursorX,self.CursorY
+			
 			local line = self.Lines[cursorY+1] or ""
 			if cursorX > #line then cursorX = #line
 			elseif cursorX < 0 then cursorX = 0 end
@@ -7447,14 +7552,12 @@ local function main()
 			local lastEnding = 0
 			local foundHighlights = {}
 
-			for i = 1, #found do
+			for i = 1,#found do
 				local pos = found[i]
-				if pos > lastEnding then
-					local ending = pos
-					local typ = foundMap[pos]
-					-- Include other operations that should occur when pos > lastEnding
-				end
-			end
+				if pos <= lastEnding then continue end
+
+				local ending = pos
+				local typ = foundMap[pos]
 				if typ == 1 then
 					ending = find(text,'"',pos+1,true)
 					while ending and sub(text,ending-1,ending-1) == "\\" do
@@ -7506,9 +7609,9 @@ local function main()
 			self.PreHighlights = foundHighlights
 			--print(tick()-start)
 			--print(#found,curLine)
-		end)
-        
-		funcs.HighlightLine = function(self, line)
+		end
+
+		funcs.HighlightLine = function(self,line)
 			local cached = self.ColoredLines[line]
 			if cached then return cached end
 
@@ -7538,18 +7641,19 @@ local function main()
 				end
 			end
 
-			for col = 1, #lineText do
-				if col > lastEnding then
-					local pre = preHighlightMap[col]
-					if pre then
-						currentType = pre[1]
-						lastEnding = pre[2]
-						highlights[col] = currentType
-						wordBeginsDotted = false
-						lastWord = nil
-						funcStatus = 0
-					else
-						local char = string.sub(lineText, col, col)
+			for col = 1,#lineText do
+				if col <= lastEnding then highlights[col] = currentType continue end
+
+				local pre = preHighlightMap[col]
+				if pre then
+					currentType = pre[1]
+					lastEnding = pre[2]
+					highlights[col] = currentType
+					wordBeginsDotted = false
+					lastWord = nil
+					funcStatus = 0
+				else
+					local char = sub(lineText,col,col)
 					if find(char,"[%a_]") then
 						local word = match(lineText,"[%a%d_]+",col)
 						local wordType = (keywords[word] and 7) or (builtIns[word] and 8)
@@ -7889,15 +7993,13 @@ local function main()
 
 		local mt = {__index = funcs}
 
-		local function new(frame, theme)
+		local function new()
 			if not builtInInited then initBuiltIn() end
 
 			local scrollV = Lib.ScrollBar.new()
 			local scrollH = Lib.ScrollBar.new(true)
 			scrollH.Gui.Position = UDim2.new(0,0,1,-16)
 			local obj = setmetatable({
-				Frame = frame,
-				Theme = theme or {},
 				FontSize = 15,
 				ViewX = 0,
 				ViewY = 0,
@@ -7918,7 +8020,7 @@ local function main()
 				MaxTextCols = 0,
 				ScrollV = scrollV,
 				ScrollH = scrollH
-			}, mt)
+			},mt)
 
 			scrollV.WheelIncrement = 3
 			scrollH.Increment = 2
@@ -7950,9 +8052,8 @@ local function main()
 			return obj
 		end
 
-        module.new = new
-		return module
-	end
+		return {new = new}
+	end)()
 
 	Lib.Checkbox = (function()
 		local funcs = {}
@@ -10026,6 +10127,7 @@ end
 
 return {InitDeps = initDeps, InitAfterMain = initAfterMain, Main = main}
 end
+}
 
 -- Main vars
 local Main, Explorer, Properties, ScriptViewer, DefaultSettings, Notebook, Serializer, Lib
@@ -10977,7 +11079,7 @@ Main = (function()
 		return Main.DepsVersionData and Main.ClientVersion == Main.DepsVersionData[1]
 	end
 	
-    function Main.Init()
+	Main.Init = function()
 		Main.Elevated = pcall(function() local a = cloneref(game:GetService("CoreGui")):GetFullName() end)
 		Main.InitEnv()
 		Main.LoadSettings()
@@ -11065,7 +11167,6 @@ Main = (function()
 	
 	return Main
 end)()
-end
 
 -- Start
 Main.Init()
